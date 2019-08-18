@@ -39,13 +39,13 @@
 #include "screenshot.h"
 
 #define IMAGE_SIZE_MAX 0x400000 // 4 MB
+#define HEADER_LENGTH 2
 
 int rigol_dg900_screenshot(char *address, int timeout)
 {
     char response[IMAGE_SIZE_MAX];
-    char *command, *image;
-    int datasize, device, length, n;
-    char c;
+    char *command;
+    int device, length, n;
     
     // Connect to LXI instrument
     device = lxi_connect(address, 0, NULL, timeout, VXI11);
@@ -60,25 +60,33 @@ int rigol_dg900_screenshot(char *address, int timeout)
     lxi_send(device, command, strlen(command), timeout);
     command = ":HCOPy:SDUMp:DATA?";
     lxi_send(device, command, strlen(command), timeout);
-    length = lxi_receive(device, response, IMAGE_SIZE_MAX, timeout);
+   
+    /*read length of the header*/
+    length = lxi_receive(device, response, HEADER_LENGTH, timeout);
     if (length < 0)
     {
         error_printf("Failed to receive message\n");
         return 1;
     }
-    c = response[1];
-    n = atoi(&c);
-    datasize = atoi(&response[2]);
-    while(datasize > length)
-        length += lxi_receive(device, response + length, IMAGE_SIZE_MAX, timeout);
+    response[length] = '\0';
+    n = atoi(&response[1]);
 
-    // Strip TMC block header
-    image = &response[0];
-    image += n + 2;
-    length -= n + 3;
+    /* read length of data */
+    length = lxi_receive(device, response, n, timeout);
+    response[length] = '\0';
+    n = atoi(response);
+
+    /* read data */
+    length = 0;
+    while(n > length)
+        length += lxi_receive \
+		  (device, \
+		   response + length, \
+		   n - length > IMAGE_SIZE_MAX? IMAGE_SIZE_MAX : n - length, \
+		   timeout);
 
     // Dump remaining BMP image data to file
-    screenshot_file_dump(image, length, "bmp");
+    screenshot_file_dump(response, length, "bmp");
 
     // Disconnect
     lxi_disconnect(device);
