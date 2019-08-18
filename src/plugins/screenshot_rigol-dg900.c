@@ -45,13 +45,14 @@ int rigol_dg900_screenshot(char *address, int timeout)
 {
     char response[IMAGE_SIZE_MAX];
     char *command;
-    int device, length, n;
+    int device, l, length, n;
     
     // Connect to LXI instrument
     device = lxi_connect(address, 0, NULL, timeout, VXI11);
     if (device == LXI_ERROR)
     {
-        error_printf("Failed to connect\n");
+        lxi_disconnect(device);
+	error_printf("Failed to connect\n");
         return 1;
     }
 
@@ -65,7 +66,8 @@ int rigol_dg900_screenshot(char *address, int timeout)
     length = lxi_receive(device, response, HEADER_LENGTH, timeout);
     if (length < 0)
     {
-        error_printf("Failed to receive message\n");
+        lxi_disconnect(device);
+        error_printf("Failed to receive header\n");
         return 1;
     }
     response[length] = '\0';
@@ -73,17 +75,32 @@ int rigol_dg900_screenshot(char *address, int timeout)
 
     /* read length of data */
     length = lxi_receive(device, response, n, timeout);
+    if (length < 0 || length != n)
+    {
+        lxi_disconnect(device);
+        error_printf("Failed to receive data length\n");
+        return 1;
+    }
     response[length] = '\0';
     n = atoi(response);
 
     /* read data */
     length = 0;
     while(n > length)
-        length += lxi_receive \
-		  (device, \
-		   response + length, \
-		   n - length > IMAGE_SIZE_MAX? IMAGE_SIZE_MAX : n - length, \
-		   timeout);
+    {
+        l = lxi_receive \
+	    (device, \
+	     response + length, \
+	     n - length > IMAGE_SIZE_MAX? IMAGE_SIZE_MAX : n - length, \
+	     timeout);
+        if (l < 0)
+        {
+            lxi_disconnect(device);
+            error_printf("Failed to receive data\n");
+            return 1;
+        }
+        length += l;
+    }
 
     // Dump remaining BMP image data to file
     screenshot_file_dump(response, length, "bmp");
